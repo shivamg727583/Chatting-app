@@ -14,10 +14,7 @@ function App() {
   const [onlineUsers, setOnlineUsers] = useState({});
 
   const messagesEndRef = useRef(null);
-  // Added a ref to safely access the current receiver in real-time callbacks
   const receiverRef = useRef(null);
-
-  // --- HELPER FUNCTIONS (Moved to the top for clarity) ---
 
   const ensureUserExists = async (user) => {
     await supabase
@@ -70,7 +67,6 @@ function App() {
       .single();
 
     if (!error && saved) {
-      // 🔑 Reconcile optimistic message with real DB row
       setMessages(prev =>
         prev.map(msg => (msg.id === tempId ? saved : msg))
       );
@@ -78,7 +74,6 @@ function App() {
 
     if (error) {
       console.error("Error sending message:", error);
-      // remove optimistic message if insert failed
       setMessages(prev => prev.filter(msg => msg.id !== tempId));
       setNewMessage(messageContent);
     }
@@ -90,19 +85,16 @@ function App() {
   };
 
 
-  // --- USE EFFECT HOOKS (Restructured for stability) ---
 
-  // 1. Auto-scroll to the latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // 2. Keep the receiver ref updated whenever the receiver state changes
   useEffect(() => {
     receiverRef.current = receiver;
   }, [receiver]);
 
-  // 3. Handle authentication (runs once)
+
   useEffect(() => {
     const {
       data: { subscription },
@@ -115,7 +107,7 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 4. Handle presence channel (depends only on session)
+
   useEffect(() => {
     if (!session) return;
     const presenceChannel = supabase.channel("online-users", {
@@ -148,7 +140,6 @@ function App() {
     return () => supabase.removeChannel(presenceChannel);
   }, [session]);
 
-  // 5. This useEffect now ONLY handles what happens when you select a chat
   useEffect(() => {
     if (!receiver || !session) return;
 
@@ -178,7 +169,7 @@ const fetchConversation = async () => {
       setUnreadCounts((prev) => ({ ...prev, [receiver.id]: 0 }));
     };
 
-    // This now works because the real-time channel below is stable.
+  
     const newUrl = new URL(window.location.href);
     newUrl.searchParams.set("chat_with", receiver.id);
     window.history.pushState({}, "", newUrl);
@@ -186,7 +177,7 @@ const fetchConversation = async () => {
     markConversationAsRead();
   }, [receiver, session]);
 
-  // 6. This useEffect now creates ONE persistent real-time channel for the app
+ 
   useEffect(() => {
     if (!session) return;
 
@@ -196,19 +187,18 @@ const fetchConversation = async () => {
   const { data, error } = await supabase
     .from("messages")
     .select("id, content, sender_id, receiver_id, created_at, read_at")
-    .or(
-      `and(sender_id.eq.${session.user.id},receiver_id.eq.${receiverId}),
-       and(sender_id.eq.${receiverId},receiver_id.eq.${session.user.id})`
-    )
+    .or(`and(sender_id.eq.${session.user.id},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${session.user.id})`)
     .order("created_at", { ascending: true });
 
-  if (!error) {
-    setMessages(data || []);
+  if (error) {
+     console.error("Error loading messages:", error.message);
+     }
+  else{
+setMessages(data || []);
   }
 };
 
 
-    // Load initial users and unread counts
     const fetchInitialData = async () => {
       const { data: usersData } = await supabase
         .from("users")
@@ -226,7 +216,7 @@ const fetchConversation = async () => {
     };
     fetchInitialData();
 
-    // Load user from URL on initial load
+
     const loadUserFromUrl = async () => {
       const receiverId = new URLSearchParams(window.location.search).get(
         "chat_with"
@@ -246,7 +236,7 @@ const fetchConversation = async () => {
     };
     loadUserFromUrl();
 
-    // The single, stable channel subscription
+  
     const channel = supabase
       .channel("realtime-changes")
       .on(
@@ -266,7 +256,7 @@ const fetchConversation = async () => {
               user.id === payload.new.id ? payload.new : user
             )
           );
-          // Using receiverRef.current here to check the currently selected user
+         
           if (receiverRef.current && receiverRef.current.id === payload.new.id)
             setReceiver(payload.new);
         }
@@ -285,23 +275,20 @@ const fetchConversation = async () => {
         newMessage.receiver_id === session.user.id);
 
     if (isForCurrentChat) {
-      // ✅ Add the message to UI immediately
       setMessages((prev) =>
         prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]
       );
 
-      // 👇 Fix: If I'm the receiver and chat is open → mark as read instantly
       if (newMessage.receiver_id === session.user.id) {
         await supabase
           .from("messages")
           .update({ is_read: true, read_at: new Date().toISOString() })
           .eq("id", newMessage.id);
 
-        // clear unread badge
         setUnreadCounts((prev) => ({ ...prev, [newMessage.sender_id]: 0 }));
       }
     } else if (newMessage.receiver_id === session.user.id) {
-      // Chat not open → increase unread count
+ 
       setUnreadCounts((prev) => ({
         ...prev,
         [newMessage.sender_id]: (prev[newMessage.sender_id] || 0) + 1,
@@ -313,7 +300,7 @@ const fetchConversation = async () => {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "messages" },
         (payload) => {
-           console.log("--- MESSAGE UPDATE EVENT ---", payload.new);
+        
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === payload.new.id ? { ...msg, ...payload.new } : msg
