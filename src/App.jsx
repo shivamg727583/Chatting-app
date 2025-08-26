@@ -274,32 +274,40 @@ const fetchConversation = async () => {
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
-        (payload) => {
-          console.log("--- NEW MESSAGE EVENT RECEIVED ---");
+        async (payload) => {
           const newMessage = payload.new;
-          const currentReceiver = receiverRef.current;
-          console.log("Message Content:", newMessage.content);
-          console.log("Current Chat Partner (in ref):", currentReceiver?.email);
+    const currentReceiver = receiverRef.current;
 
-          const isForCurrentChat =
-            (newMessage.sender_id === session.user.id &&
-              newMessage.receiver_id === currentReceiver?.id) ||
-            (newMessage.sender_id === currentReceiver?.id &&
-              newMessage.receiver_id === session.user.id);
+    const isForCurrentChat =
+      (newMessage.sender_id === session.user.id &&
+        newMessage.receiver_id === currentReceiver?.id) ||
+      (newMessage.sender_id === currentReceiver?.id &&
+        newMessage.receiver_id === session.user.id);
 
-
-
-         if (isForCurrentChat) {
-     
+    if (isForCurrentChat) {
+      // ✅ Add the message to UI immediately
       setMessages((prev) =>
         prev.some((m) => m.id === newMessage.id) ? prev : [...prev, newMessage]
-      )} else if (newMessage.receiver_id === session.user.id) {
-            setUnreadCounts((prev) => ({
-              ...prev,
-              [newMessage.sender_id]: (prev[newMessage.sender_id] || 0) + 1,
-            }));
-          }
-        }
+      );
+
+      // 👇 Fix: If I'm the receiver and chat is open → mark as read instantly
+      if (newMessage.receiver_id === session.user.id) {
+        await supabase
+          .from("messages")
+          .update({ is_read: true, read_at: new Date().toISOString() })
+          .eq("id", newMessage.id);
+
+        // clear unread badge
+        setUnreadCounts((prev) => ({ ...prev, [newMessage.sender_id]: 0 }));
+      }
+    } else if (newMessage.receiver_id === session.user.id) {
+      // Chat not open → increase unread count
+      setUnreadCounts((prev) => ({
+        ...prev,
+        [newMessage.sender_id]: (prev[newMessage.sender_id] || 0) + 1,
+      }));
+    }
+  }
       )
       .on(
         "postgres_changes",
